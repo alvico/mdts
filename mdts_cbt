@@ -7,7 +7,7 @@ SOURCE_BRANCH="master"
 REPO_URI="http://repo.midonet.org/midonet/current"
 REPO_CURL_URI="http://repo.midonet.org/packages.midokura.key"
 REPO_DIST="unstable"
-ART_URI="http://artifactory-dev.bcn.midokura.com:8081/artifactory/midonet"
+ART_URI="http://artifactory-dev.bcn.midokura.com/artifactory/midonet"
 ART_CURL_URI="http://bcn4.bcn.midokura.com:8081/artifactory/api/gpg/key/public"
 ART_DIST="nightly"
 PKG_COMP="main"
@@ -300,7 +300,7 @@ elif [ ".$SOURCE_OR_PACKAGE" == ".package" ]; then
     #Install midonet from pre-built packages
     
     # add midokura sources to apt
-    sudo bash -c "echo deb $PKG_URI $PKG_DIST $PKG_COMP > /etc/apt/sources.list.d/midokura-midonet.list"
+    sudo bash -c "echo deb [arch=all] $PKG_URI $PKG_DIST $PKG_COMP > /etc/apt/sources.list.d/midokura-midonet.list"
     curl -k $CURL_URI | sudo apt-key add - && true
 
     sudo apt-get update
