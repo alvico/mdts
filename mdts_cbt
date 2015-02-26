@@ -16,7 +16,7 @@ TESTS_TO_RUN=
 TESTS_TO_EXCLUE=
 
 # Defaults for internal vars
-TEST_ROOT=$WORKSPACE/mdts
+TEST_ROOT=$WORKSPACE/midonet/tests
 GIT_SERVER="http://github.com"
 INSTALL_PKGS=true
 PKG_URI=
