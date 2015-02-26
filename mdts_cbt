@@ -1,0 +1,346 @@
+#!/bin/bash -xe
+
+# Defaults which can be modified via command line args
+SOURCE_OR_PACKAGE="source"
+SOURCE_REPO="midonet/midonet"
+SOURCE_BRANCH="master"
+REPO_URI="http://repo.midonet.org/midonet/current"
+REPO_CURL_URI="http://repo.midonet.org/packages.midokura.key"
+REPO_DIST="unstable"
+ART_URI="http://artifactory-dev.bcn.midokura.com:8081/artifactory/midonet"
+ART_CURL_URI="http://bcn4.bcn.midokura.com:8081/artifactory/api/gpg/key/public"
+ART_DIST="nightly"
+PKG_COMP="main"
+LOCAL_TEST="true"
+TESTS_TO_RUN=
+TESTS_TO_EXCLUE=
+
+# Defaults for internal vars
+TEST_ROOT=$WORKSPACE/mdts
+GIT_SERVER="http://github.com"
+INSTALL_PKGS=true
+PKG_URI=
+PKG_DIST=
+FREE_VAR_FIN=false
+FREE_VAR_TMP=
+FREE_VAR_S_OR_P=
+DEBUG=false
+
+function usage()
+{
+    set +x
+    if [ ".$1" != "." ]; then
+	echo "Error: $1"
+    fi
+    echo "Usage: mdts_cbt -s <repo=\"midonet/midonet\"> <branch=\"master\"> [-r] [-ni] "
+    echo "                      [-t <tests=test_bridge>] [-e <tests>]"
+    echo "       mdts_cbt -p <uri=\"http://repo.midonet.org/midonet/current\"> <component=\"unstable\">"
+    echo "                      [-r] [-ni] [-t <tests=test_bridge>] [-e <tests>]"
+    echo "       mdts_cbt -a <uri=\"http://bcn4.bcn.midokura.com:8081/artifactory/midonet\"> <component=\"unstable\">"
+    echo "                      [-r] [-ni] [-t <tests=test_bridge>] [-e <tests>]"
+    echo "    Options: "
+    echo "       -s <repo> <branch>  Test against MidoNet source code found on <branch> in <repo>. "
+    echo "       -p <uri> <item>     Test against MidoNet <item> repository located at <uri>"
+    echo "       -a <uri> <item>     Test against MidoNet <item> artifactory product located at <uri>"
+    echo "       -t <tests>          Tests to run against the specified target in quotes (defaults"
+    echo "                           to 'test_bridge' only)"
+    echo "       -e <tests>          Tests to exclude in run against the specified target in quotes" 
+    echo "       -r                  Test from remote test server (like jenkins) on a fresh VM host"
+    echo "                           (versus local machine)"
+    echo "       -ni                 Do not install base system packages"
+}
+
+function clean()
+{
+    CLEAN_TARGET=$*
+    if [ ".$CLEAN_TARGET" == "." ]; then
+	CLEAN_TARGET="process"
+    fi
+
+    if [ ".$CLEAN_TARGET" == ".all" ]; then
+	CLEAN_TARGET="process mdts conf logs libs"
+    fi
+
+    if [ ".$CLEAN_TARGET" == ".files" ]; then
+	CLEAN_TARGET="conf logs libs"
+    fi
+
+    for i in $CLEAN_TARGET; do
+	if [ ".$i" == ".process" ]; then
+	    cd $TEST_ROOT/mmm/scripts
+	    sudo ./stop && true
+	    sudo ./shutdown && true
+	    
+	    sudo update-rc.d midolman disable && true
+	fi
+	if [ ".$i" == ".mdts" ]; then
+	    sudo dpkg -P midolman midonet-api python-midonetclient && true
+	fi
+	if [ ".$i" == ".conf" ]; then
+	    sudo rm -rf /etc/zookeeper.*
+	    sudo rm -rf /etc/quagga.*
+	    sudo rm -rf /etc/cassandra.*
+	    sudo rm -rf /etc/midolman.*
+	    sudo rm -rf /etc/quagga.*
+	fi
+	if [ ".$i" == ".logs" ]; then
+	    sudo rm -rf /var/log/zookeeper.*
+	    sudo rm -rf /var/log/quagga.*
+	    sudo rm -rf /var/log/cassandra.*
+	    sudo rm -rf /var/log/midolman.*
+	    sudo rm -rf /var/log/quagga.*
+	    sudo rm -rf /var/log/tomcat7/*
+	fi
+	if [ ".$i" == ".libs" ]; then
+	    sudo rm -rf /var/lib/zookeeper.*
+	    sudo rm -rf /var/lib/quagga.*
+	    sudo rm -rf /var/lib/cassandra.*
+	    sudo rm -rf /var/lib/midolman.*
+	    sudo rm -rf /var/lib/quagga.*
+	fi
+    done
+}
+
+while [ "$1" != "" ]; do
+    case $1 in
+	-stop | --stop )
+	    clean process
+	    exit
+	    ;;
+
+	-c | --clean )
+	    clean process mdts
+	    exit
+	    ;;
+	-ca | --clean-all )
+	    clean all
+	    exit
+	    ;;
+	-cc | --clean-config )
+	    clean process 
+	    clean files
+	    exit
+	    ;;
+	-d | --debug )
+	    DEBUG="true"
+	    ;;
+	-r | --remote )
+	    LOCAL_TEST="false"
+	    ;;
+	-ni | --no-install )
+	    INSTALL_PKGS="false"
+	    ;;
+        -s | --source )
+	    if [ ".$FREE_VAR_S_OR_P" != "." ]; then
+		usage "Specified more than one MN target (-s or -p)"
+		exit 1
+	    fi
+	    FREE_VAR_S_OR_P="source"
+            ;;
+        -t | --test )
+            shift
+	    TESTS_TO_RUN=$1
+            ;;
+        -e | --exclude )
+            shift
+	    TESTS_TO_EXCLUDE=$1
+            ;;
+        -p | --package )
+	    if [ ".$FREE_VAR_S_OR_P" != "." ]; then
+		usage "Specified more than one MN target (-s or -p)"
+		exit 1
+	    fi
+	    FREE_VAR_S_OR_P="package"
+ 	    PKG_URI=$REPO_URI
+	    PKG_DIST=$REPO_DIST
+	    CURL_URI=$REPO_CURL_URI
+            ;;
+        -a | --artifactory )
+	    if [ ".$FREE_VAR_S_OR_P" != "." ]; then
+		usage "Specified more than one MN target (-s or -p)"
+		exit 1
+	    fi
+	    FREE_VAR_S_OR_P="package"
+ 	    PKG_URI=$ART_URI
+	    PKG_DIST=$ART_DIST
+	    CURL_URI=$ART_CURL_URI
+            ;;
+        -h | --help )
+            usage
+            exit
+            ;;
+        * )
+	    if [ ".$FREE_VAR_FIN" == ".true" -o ".$FREE_VAR_S_OR_P" == "." ]; then
+		usage "'$1' is not a valid option or parameter"
+		exit 1
+	    fi
+
+	    if [ ".$FREE_VAR_TMP" == "." ]; then
+		FREE_VAR_TMP=$1
+	    else
+		SOURCE_REPO=$FREE_VAR_TMP
+		SOURCE_BRANCH=$1
+		PKG_URI=$FREE_VAR_TMP
+		PKG_DIST=$1
+		FREE_VAR_FIN=true
+	    fi
+	    ;;
+    esac
+    shift
+done
+
+if [ ".$FREE_VAR_S_OR_P" != ".source" -a ".$FREE_VAR_S_OR_P" != ".package" ]; then
+    usage "Must specify at least one of '-s' (for source target) or 'p' (for package target)"
+    exit 1
+fi
+
+if [ ".$FREE_VAR_FIN" == ".false" ]; then
+    if [ ".$FREE_VAR_TMP" != "." ]; then
+	PKG_URI=$FREE_VAR_TMP
+	SOURCE_BRANCH=$FREE_VAR_TMP
+    fi
+fi
+
+SOURCE_OR_PACKAGE=$FREE_VAR_S_OR_P
+
+TESTS_LINE=
+if [ ".$TESTS_TO_RUN" != "." ]; then
+    for i in $TESTS_TO_RUN; do
+	TESTS_LINE="$TESTS_LINE -t $i"
+    done
+fi
+
+EXCLUDE_LINE=
+if [ ".$TESTS_TO_EXCLUDE" != "." ]; then
+    for i in $TESTS_TO_EXCLUDE; do
+	EXCLUDE_LINE="$EXCLUDE_LINE -e $i"
+    done
+fi
+
+if [ ".$LOCAL_TEST" == ".false" ]; then
+    # Mounting ramdisks
+    echo "sudo cp -RL --preserve=all /var/lib /tmp/"
+    # sudo mkdir /var/lib
+    echo "sudo mount -t tmpfs -o size=1024m tmpfs /var/lib"
+    echo "sudo cp -RL --preserve=all /tmp/lib/* /var/lib/"
+    echo "sudo cp -RL --preserve=all /var/log /tmp/"
+    # sudo mkdir /var/log
+    echo "sudo mount -t tmpfs -o size=256m tmpfs /var/log"
+    echo "sudo cp -RL --preserve=all /tmp/log/* /var/log"
+fi
+
+#Set up the test server with all the tools we'll need to test MidoNet
+echo "Tests are in $TEST_ROOT (will create if needed)"
+echo "We will test against $SOURCE_OR_PACKAGE"
+cd $TEST_ROOT
+
+echo "Running on IP:"
+ifconfig eth0 | awk '/inet / { print $2 }' | sed -e s/addr://
+
+echo "Executing the script as:"
+whoami
+
+echo "Executing at:"
+date
+
+if [ ".$DEBUG" == ".true" ]; then
+    set +x
+    echo source_or_package=$SOURCE_OR_PACKAGE
+    echo source_branch=$SOURCE_BRANCH
+    echo source_repo=$SOURCE_REPO
+    echo pkg_uri=$PKG_URI
+    echo curl_uri=$CURL_URI
+    echo pkg_distribution=$PKG_DIST
+    echo pkg_component=$PKG_COMP
+    echo test_root=$TEST_ROOT
+    echo tests_to_run=$TESTS_TO_RUN
+    echo tests_exclude=$TESTS_TO_EXCLUDE
+    echo workspace=$WORKSPACE
+    exit
+fi
+
+if [ ".$INSTALL_PKGS" == ".true" ]; then
+    sudo ./setup_test_server
+fi
+
+if [ ".$SOURCE_OR_PACKAGE" == ".source" ]; then
+
+    rm -rf $WORKSPACE/midonet
+    git clone $GIT_SERVER/$SOURCE_REPO -b $SOURCE_BRANCH $WORKSPACE/midonet
+
+    BUILDWS=$WORKSPACE/midonet
+
+    echo "Will build source from $BUILDWS"
+    cd $BUILDWS
+
+    export LD_LIBRARY_PATH=".:/lib:/usr/lib:/usr/local/lib:./lib"
+
+    git submodule update --init --recursive
+
+    # Build midonet source
+    ./gradlew -x test debian
+
+    sudo rm -f /var/log/midolman*/*
+    sudo rm -f /var/log/zookeeper*/*
+    sudo rm -f /var/log/cassandra*/*
+    
+    echo Installing hot midonet packages just out of oven
+    for package in `find . -name *.deb`
+    do
+	sudo dpkg --force-confold -i $package
+    done
+
+elif [ ".$SOURCE_OR_PACKAGE" == ".package" ]; then
+
+    # CLean pre-installed midolman if present
+    if [[ `dpkg -l | grep -q midolman` -eq 0 ]]; then
+	clean mdts && true
+    fi
+
+    #Install midonet from pre-built packages
+    
+    # add midokura sources to apt
+    sudo bash -c "echo deb $PKG_URI $PKG_DIST $PKG_COMP > /etc/apt/sources.list.d/midokura-midonet.list"
+    curl -k $CURL_URI | sudo apt-key add - && true
+
+    sudo apt-get update
+
+    # Install midolman
+    sudo apt-get install -y --force-yes midolman
+    sudo update-rc.d midolman enable
+    
+    sudo apt-get install -y --force-yes python-midonetclient
+    sudo apt-get -o Dpkg::Options::="--force-confnew" install -y --force-yes midonet-api
+fi
+
+cd $TEST_ROOT/mmm
+# all mmm init
+sudo ./init
+
+cd scripts
+sudo ./boot
+sudo ./start
+
+# Wait for all midolman hosts
+
+RETRIES=30
+CONNECTED=false
+while [ $CONNECTED == "false" ]; do
+    if [ `midonet-cli --midonet-url http://localhost:8080/midonet-api -A -e "host list" | wc -l` -eq 3 ]; then
+	CONNECTED=true
+    elif [ $RETRIES -eq 0 ]; then
+	echo "Midolman hosts failed to start.  Midonet-API host list:"
+	midonet-cli --midonet-url http://localhost:8080/midonet-api -A -e "host list"
+	exit 1
+    else
+	(( RETRIES-- ))
+	sleep 5
+    fi
+done
+
+cd $TEST_ROOT/mdts/tests/functional_tests
+
+# exclude bgp and l2gw tests (bgp and l2gw tests are executed in separate jobs)
+./run_tests.sh $TESTS_LINE $EXCLUDE_LINE
+
+

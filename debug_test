@@ -1,0 +1,3 @@
+#!/bin/bash
+
+sudo PYTHONPATH=../../../ nosetests -vv $* --pdb --pdb-failures -x
