@@ -124,10 +124,10 @@ sudo pip install pyhamcrest
 curl -sSL https://get.docker.com/ubuntu/ | sudo sh
 
 #
-# Add midokura artifactory as a docker registry
+# Add midokura artifactory as a docker registry if it's there
 #
-
-git clone http://github.com/midokura/midokura-tools
-/bin/bash -c midokura-tools/docker-repo/docker-image-setup
+if [ -f midokura-tools/docker-repo/docker-image-setup ]; then
+    /bin/bash -c midokura-tools/docker-repo/docker-image-setup
+fi
 
 echo $SECONDS
