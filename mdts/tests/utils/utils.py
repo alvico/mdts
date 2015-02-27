@@ -236,7 +236,7 @@ def ipv4_int(ipv4_str):
 
 def get_top_dir():
     """Returns the root dir of MDTS"""
-    topdir = os.path.realpath(os.path.dirname(__file__) + '../../../')
+    topdir = os.path.realpath(os.path.dirname(__file__) + '../../../../')
     return topdir
 
 def get_midolman_script_dir():
