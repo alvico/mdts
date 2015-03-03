@@ -1,5 +1,11 @@
 #!/bin/bash -xe
 
+ROOT=$1
+
+if [ ".$ROOT" == "." ]; then
+    ROOT=`pwd`
+fi
+
 sudo apt-get update
 
 # git, wget, and curl
@@ -126,8 +132,8 @@ curl -sSL https://get.docker.com/ubuntu/ | sudo sh
 #
 # Add midokura artifactory as a docker registry if it's there
 #
-if [ -f midokura-tools/docker-repo/docker-image-setup ]; then
-    /bin/bash -c midokura-tools/docker-repo/docker-image-setup
+if [ -f $ROOT/midokura-tools/docker-repo/docker-image-setup ]; then
+    /bin/bash -c $ROOT/midokura-tools/docker-repo/docker-image-setup
 fi
 
 echo $SECONDS

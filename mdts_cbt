@@ -26,7 +26,7 @@ PKG_DIST=
 FREE_VAR_FIN=false
 FREE_VAR_TMP=
 FREE_VAR_S_OR_P=
-DEBUG=false
+NO_RUN=false
 
 function usage()
 {
@@ -123,8 +123,8 @@ while [ "$1" != "" ]; do
 	    clean files
 	    exit
 	    ;;
-	-d | --debug )
-	    DEBUG="true"
+	-n | --no-run )
+	    NO_RUN="true"
 	    ;;
 	-r | --remote )
 	    LOCAL_TEST="false"
@@ -245,24 +245,24 @@ whoami
 echo "Executing at:"
 date
 
-if [ ".$DEBUG" == ".true" ]; then
-    set +x
-    echo source_or_package=$SOURCE_OR_PACKAGE
-    echo source_branch=$SOURCE_BRANCH
-    echo source_repo=$SOURCE_REPO
-    echo pkg_uri=$PKG_URI
-    echo curl_uri=$CURL_URI
-    echo pkg_distribution=$PKG_DIST
-    echo pkg_component=$PKG_COMP
-    echo test_root=$TEST_ROOT
-    echo tests_to_run=$TESTS_TO_RUN
-    echo tests_exclude=$TESTS_TO_EXCLUDE
-    echo workspace=$WORKSPACE
+set +x
+echo source_or_package=$SOURCE_OR_PACKAGE
+echo source_branch=$SOURCE_BRANCH
+echo source_repo=$SOURCE_REPO
+echo pkg_uri=$PKG_URI
+echo curl_uri=$CURL_URI
+echo pkg_distribution=$PKG_DIST
+echo pkg_component=$PKG_COMP
+echo test_root=$TEST_ROOT
+echo tests_to_run=$TESTS_TO_RUN
+echo tests_exclude=$TESTS_TO_EXCLUDE
+echo workspace=$WORKSPACE
+if [ ".$NO_RUN" == ".true" ]; then
     exit
 fi
 
 if [ ".$INSTALL_PKGS" == ".true" ]; then
-    sudo ./setup_test_server
+    sudo ./setup_test_server $TEST_ROOT
 fi
 
 if [ ".$SOURCE_OR_PACKAGE" == ".source" ]; then
