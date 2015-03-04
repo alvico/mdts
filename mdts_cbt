@@ -17,6 +17,10 @@ LOCAL_TEST="true"
 TESTS_TO_RUN=
 TESTS_TO_EXCLUE=
 
+if [ ".$WORKSPACE" == "." ]; then
+    WORKSPACE=$( cd `dirname ${BASH_SOURCE[0]}`/../.. ; pwd)
+fi
+
 # Defaults for internal vars
 TEST_ROOT=$WORKSPACE/midonet/tests
 GIT_SERVER="http://github.com"
@@ -96,7 +100,7 @@ function clean()
     if [ ".$1" == "." ]; then
 	    clean_target process
     else
-	while ".$1" != "."; do
+	while [ ".$1" != "." ]; do
 	    if [ ".$1" == ".all" ]; then
 		for i in process mdts conf logs libs; do
 		    clean_target $i
@@ -116,25 +120,21 @@ function clean()
 
 }
 
+CLEAN_CMD=
 while [ ".$1" != "." ]; do
     case $1 in
 	-stop | --stop )
-	    clean process
-	    exit
+	    CLEAN_CMD="process"
 	    ;;
 
 	-c | --clean )
-	    clean process mdts
-	    exit
+	    CLEAN_CMD="process mdts"
 	    ;;
 	-ca | --clean-all )
-	    clean all
-	    exit
+	    CLEAN_CMD="all"
 	    ;;
 	-cc | --clean-config )
-	    clean process 
-	    clean files
-	    exit
+	    CLEAN_CMD="process files"
 	    ;;
 	-n | --no-run )
 	    NO_RUN="true"
@@ -204,8 +204,8 @@ while [ ".$1" != "." ]; do
     shift
 done
 
-if [ ".$FREE_VAR_S_OR_P" != ".source" -a ".$FREE_VAR_S_OR_P" != ".package" ]; then
-    usage "Must specify at least one of '-s' (for source target) or 'p' (for package target)"
+if [ ".$CLEAN_CMD" == "." -a ".$FREE_VAR_S_OR_P" != ".source" -a ".$FREE_VAR_S_OR_P" != ".package" ]; then
+    usage "Must specify at least one of '-s' (for source target) or 'p' (for package target) or a clean target"
     exit 1
 fi
 
@@ -249,8 +249,8 @@ echo "Tests are in $TEST_ROOT (will create if needed)"
 echo "We will test against $SOURCE_OR_PACKAGE"
 cd $TEST_ROOT
 
-echo "Running on IP:"
-ifconfig eth0 | awk '/inet / { print $2 }' | sed -e s/addr://
+echo "IP interfaces:"
+ifconfig | grep -A1 'encap:Ethernet' | grep -v "\-\-" | awk '/Ethernet / { printf "%s: ", $1 } /inet / { print $2 }' | sed 's/addr://g'
 
 echo "Executing the script as:"
 whoami
@@ -270,12 +270,19 @@ echo test_root=$TEST_ROOT
 echo tests_to_run=$TESTS_TO_RUN
 echo tests_exclude=$TESTS_TO_EXCLUDE
 echo workspace=$WORKSPACE
+echo clean_target=$CLEAN_CMD
 if [ ".$NO_RUN" == ".true" ]; then
     exit
 fi
 
+set -x
+
+if [ ".$CLEAN_CMD" != "." ]; then
+    clean $CLEAN_CMD
+fi
+
 if [ ".$INSTALL_PKGS" == ".true" ]; then
-    sudo ./setup_test_server $TEST_ROOT
+    ./setup_test_server $TEST_ROOT
 fi
 
 if [ ".$SOURCE_OR_PACKAGE" == ".source" ]; then
