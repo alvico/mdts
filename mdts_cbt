@@ -288,10 +288,10 @@ fi
 
 if [ ".$SOURCE_OR_PACKAGE" == ".source" ]; then
 
-    rm -rf $WORKSPACE/midonet
-    git clone $GIT_SERVER/$SOURCE_REPO -b $SOURCE_BRANCH $WORKSPACE/midonet
+    rm -rf $WORKSPACE/midonet_source
+    git clone $GIT_SERVER/$SOURCE_REPO -b $SOURCE_BRANCH $WORKSPACE/midonet_source
 
-    BUILDWS=$WORKSPACE/midonet
+    BUILDWS=$WORKSPACE/midonet_source
 
     echo "Will build source from $BUILDWS"
     cd $BUILDWS
