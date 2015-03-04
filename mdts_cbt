@@ -52,58 +52,71 @@ function usage()
     echo "       -ni                 Do not install base system packages"
 }
 
-function clean()
+function clean_target()
 {
-    CLEAN_TARGET=$*
-    if [ ".$CLEAN_TARGET" == "." ]; then
-	CLEAN_TARGET="process"
-    fi
-
-    if [ ".$CLEAN_TARGET" == ".all" ]; then
-	CLEAN_TARGET="process mdts conf logs libs"
-    fi
-
-    if [ ".$CLEAN_TARGET" == ".files" ]; then
-	CLEAN_TARGET="conf logs libs"
-    fi
-
-    for i in $CLEAN_TARGET; do
-	if [ ".$i" == ".process" ]; then
+    case $1 in
+	"process")
 	    cd $TEST_ROOT/mmm/scripts
 	    sudo ./stop && true
 	    sudo ./shutdown && true
-	    
 	    sudo update-rc.d midolman disable && true
-	fi
-	if [ ".$i" == ".mdts" ]; then
+	    ;;
+	"mdts")
 	    sudo dpkg -P midolman midonet-api python-midonetclient && true
-	fi
-	if [ ".$i" == ".conf" ]; then
+	    ;;
+	"conf")
 	    sudo rm -rf /etc/zookeeper.*
 	    sudo rm -rf /etc/quagga.*
 	    sudo rm -rf /etc/cassandra.*
 	    sudo rm -rf /etc/midolman.*
 	    sudo rm -rf /etc/quagga.*
-	fi
-	if [ ".$i" == ".logs" ]; then
+	    ;;
+	"logs")
 	    sudo rm -rf /var/log/zookeeper.*
 	    sudo rm -rf /var/log/quagga.*
 	    sudo rm -rf /var/log/cassandra.*
 	    sudo rm -rf /var/log/midolman.*
 	    sudo rm -rf /var/log/quagga.*
 	    sudo rm -rf /var/log/tomcat7/*
-	fi
-	if [ ".$i" == ".libs" ]; then
+	    ;;
+	"libs")
 	    sudo rm -rf /var/lib/zookeeper.*
 	    sudo rm -rf /var/lib/quagga.*
 	    sudo rm -rf /var/lib/cassandra.*
 	    sudo rm -rf /var/lib/midolman.*
 	    sudo rm -rf /var/lib/quagga.*
-	fi
-    done
+	    ;;
+	*)
+	    ;;
+    esac
 }
 
-while [ "$1" != "" ]; do
+function clean()
+{
+    if [ ".$1" == "." ]; then
+	    clean_target process
+    else
+	while ".$1" != "."; do
+	    if [ ".$1" == ".all" ]; then
+		for i in process mdts conf logs libs; do
+		    clean_target $i
+		done
+	    elif [ ".$1" == ".files" ]; then
+		for i in conf logs libs; do
+		    clean_target $i
+		done
+	    elif [ ".$1" == "." ]; then
+		clean_target process
+	    else
+		clean_target $1
+	    fi
+	    shift
+	done
+    fi
+
+}
+
+while [ ".$1" != "." ]; do
     case $1 in
 	-stop | --stop )
 	    clean process
