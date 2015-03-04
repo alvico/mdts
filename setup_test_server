@@ -48,7 +48,7 @@ if [ $(lsb_release  -cs) != "trusty" ] ; then
     sudo sed -i 's/\(JAVA_HOME=\).*$/\1\/usr\/lib\/jvm\/java-1.7.0-openjdk-amd64/' /etc/zookeeper/zookeeper-env.sh
 fi
 
-sudo service zookeeper stop
+sudo service zookeeper stop && true
 sudo update-rc.d zookeeper defaults
 
 # Install zookeeper tools
@@ -104,7 +104,7 @@ sudo apt-get install -y --force-yes tomcat7
 sudo apt-get install -y --force-yes python-httplib2
 sudo apt-get install --no-install-recommends -y python-webob python-eventlet
 
-sudo service tomcat7 stop
+sudo service tomcat7 stop && true
 sudo sed -i 's/#\(JAVA_HOME=\).*$/\1\/usr\/lib\/jvm\/java-1.7.0-openjdk-amd64/' /etc/default/tomcat7
 sudo update-rc.d tomcat7 enable
 
