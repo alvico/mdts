@@ -60,7 +60,7 @@ function usage()
     echo "       -r                      Test from remote test server (like jenkins) on a fresh VM host"
     echo "                               (versus local machine)"
     echo "       -ne                     Do not install base system environment"
-    echo "       -bo                     Build/install MN only, do not run tests"
+    echo "       -nt                     Do not run tests, only fetch/build/install MN"
     echo "       -n                      Dry run: print commands that would be run but don't proceed"
     echo " Targets: (must specify one and only one):"
     echo "    Pull MN from git repository:"
@@ -241,6 +241,60 @@ function install_package_from_repo {
     $ECHO sudo apt-get -o Dpkg::Options::="--force-confnew" install -y --force-yes midonet-api
 }
 
+function print_config_check() {
+    NEG="will NOT"
+    if [ ".$1" == .$2 ]; then
+	NEG="WILL"
+    fi
+    shift 2
+    echo "We $NEG $@"
+}
+
+function print_config {
+    set +x
+    echo target=$TARGET
+    echo install_env=$INSTALL_ENV
+    echo git_server=$GIT_SERVER
+    echo git_use_ssh=$GIT_SSH
+    echo git_ssh_user=$GIT_SSH_USER
+    echo git_credentials=$GIT_CREDENTIALS
+    echo file_location=$FILE_LOCATION
+    echo source_branch=$SOURCE_BRANCH
+    echo source_repo=$SOURCE_REPO
+    echo install_package=$INSTALL_PKG
+    echo pkg_uri=$PKG_URI
+    echo curl_uri=$CURL_URI
+    echo pkg_distribution=$PKG_DIST
+    echo pkg_component=$PKG_COMP
+    echo test_root=$TEST_ROOT
+    echo tests_to_run=$TESTS_TO_RUN
+    echo tests_exclude=$TESTS_TO_EXCLUDE
+    echo workspace=$WORKSPACE
+    echo clean_target=$CLEAN_CMD
+
+    print_config_check $INSTALL_ENV true "install and setup base environment"
+    case $TARGET in
+	git|source)
+	    print_config_check $TARGET "git" "fetch MN source from git"
+	    print_config_check true true "build MN source"
+	    print_config_check $INSTALL_PKG true "install MN packages"
+	    ;;
+	file )
+	    print_config_check true false "fetch MN source from git"
+	    print_config_check true false "build MN source"
+	    print_config_check true true "install MN packages"
+	    ;;
+	package )
+	    print_config_check true true "fetch MN packages from APT-GET repository"
+	    ;;
+	artifactory )
+	    print_config_check true true "fetch MN packages from Artifactory"
+	    ;;
+    esac
+    print_config_check $RUN_TESTS true "run MDTS functional tests"
+
+    set -x
+}
 
 
 #MAIN
@@ -289,7 +343,7 @@ while [ ".$1" != "." ]; do
 	    shift
 	    ;;
 
-	-bo | --build-only )
+	-nt | --no-tests )
 	    RUN_TESTS="false"
 	    shift
 	    ;;
@@ -297,10 +351,11 @@ while [ ".$1" != "." ]; do
 	# Test setup
 	-tr | --test-root )
 	    shift
-	    if ! check_and_set TESTS_ROOT $*; then
+	    if ! check_and_set TEST_ROOT $*; then
 		usage "Invalid directory for test_root: $1"
 		exit 1
 	    fi
+	    shift
 	    ;;
 
         -t | --test )
@@ -381,6 +436,7 @@ while [ ".$1" != "." ]; do
 
 	# Extra flags to tweak GIT bheavior
 	-git-server | --git-server )
+	    shift
 	    if ! check_and_set GIT_SERVER $*; then
 		usage "Invalid GIT server: $1"
 		exit 1
@@ -389,6 +445,7 @@ while [ ".$1" != "." ]; do
             ;;
 
 	-git-cred | --git-credentials )
+	    shift
 	    if ! check_and_set GIT_CREDENTIALS $*; then
 		usage "Invalid GIT credentials: $1"
 		exit 1
@@ -397,6 +454,7 @@ while [ ".$1" != "." ]; do
             ;;
 
 	-git-ssh | --git-ssh )
+	    shift
 	    if ! check_and_set GIT_SSH_USER $*; then
 		usage "Invalid GIT ssh user: $1"
 		exit 1
@@ -424,36 +482,16 @@ if [ ".$CLEAN_CMD" == "." -a ".$TARGET" == "." ]; then
     exit 1
 fi
 
-echo "IP interfaces:"
+echo "IP interfaces: "
 ifconfig | grep -A1 'encap:Ethernet' | grep -v "\-\-" | awk '/Ethernet / { printf "%s: ", $1 } /inet / { print $2 }' | sed 's/addr://g'
 
-echo "Executing the script as:"
+echo "Executing the script as: "
 whoami
 
-echo "Executing at:"
+echo "Executing at time: "
 date
 
-set +x
-echo target=$TARGET
-echo install_env=$INSTALL_ENV
-echo git_server=$GIT_SERVER
-echo git_use_ssh=$GIT_SSH
-echo git_ssh_user=$GIT_SSH_USER
-echo git_credentials=$GIT_CREDENTIALS
-echo file_location=$FILE_LOCATION
-echo source_branch=$SOURCE_BRANCH
-echo source_repo=$SOURCE_REPO
-echo install_package=$INSTALL_PKG
-echo pkg_uri=$PKG_URI
-echo curl_uri=$CURL_URI
-echo pkg_distribution=$PKG_DIST
-echo pkg_component=$PKG_COMP
-echo test_root=$TEST_ROOT
-echo tests_to_run=$TESTS_TO_RUN
-echo tests_exclude=$TESTS_TO_EXCLUDE
-echo workspace=$WORKSPACE
-echo clean_target=$CLEAN_CMD
-set -x
+print_config
 
 # Set up echo to spit out commands instead of running them if dry-run is set
 if [ ".$NO_RUN" == ".true" ]; then
@@ -481,10 +519,6 @@ if [ ".$LOCAL_TEST" == ".false" ]; then
 fi
 
 #Set up the test server with all the tools we'll need to test MidoNet
-echo "Tests are in $TEST_ROOT (will create if needed)"
-echo "We will pull MN from $TARGET"
-$ECHO cd $TEST_ROOT
-
 if [ ".$INSTALL_ENV" == ".true" ]; then
     $ECHO ./setup_test_server $TEST_ROOT
 fi
@@ -499,7 +533,7 @@ fi
 case $TARGET in
     "git")
 	fetch_source_from_git $SOURCE_DIR $GIT_SERVER $SOURCE_REPO $SOURCE_BRANCH $GIT_SSH $GIT_SSH_USER
-	    build_source_from_dir $SOURCE_DIR
+	build_source_from_dir $SOURCE_DIR
 	if [ ".$INSTALL_PKG" == ".true" ]; then
 	    install_package_from_dir $SOURCE_DIR
 	fi
@@ -524,6 +558,7 @@ if [ ".$RUN_TESTS" == ".false" ]; then
     exit
 fi
 
+echo "Tests are in $TEST_ROOT (will create if needed)"
 $ECHO cd $TEST_ROOT/mmm
 # all mmm init
 $ECHO sudo ./init
