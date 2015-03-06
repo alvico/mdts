@@ -27,7 +27,7 @@ TESTS_TO_RUN=
 TESTS_TO_EXCLUDE=
 
 # Defaults for internal vars
-TEST_ROOT=$WORKSPACE/mdts/tests
+TEST_ROOT=$( cd `dirname ${BASH_SOURCE[0]}` ; pwd)
 INSTALL_ENV=true
 INSTALL_PKG=true
 FETCH_SOURCE=true
