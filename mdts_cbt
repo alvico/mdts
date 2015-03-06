@@ -518,6 +518,8 @@ if [ ".$LOCAL_TEST" == ".false" ]; then
     sudo cp -RL --preserve=all /tmp/log/* /var/log
 fi
 
+$ECHO cd $TEST_ROOT
+
 #Set up the test server with all the tools we'll need to test MidoNet
 if [ ".$INSTALL_ENV" == ".true" ]; then
     $ECHO ./setup_test_server $TEST_ROOT
