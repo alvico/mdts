@@ -16,6 +16,8 @@ GIT_CREDENTIALS=
 REPO_URI="http://repo.midonet.org/midonet/current"
 REPO_CURL_URI="http://repo.midonet.org/packages.midokura.key"
 REPO_DIST="unstable"
+#ART_URI="ssh://ci-jenkins@artifactory-dev.bcn.midokura.com/artifactory/midonet"
+#ART_CURL_URI="http://artifactory-dev.bcn.midokura.com/artifactory/api/gpg/key/public"
 ART_URI="http://artifactory-dev.bcn.midokura.com/artifactory/midonet"
 ART_CURL_URI="http://artifactory-dev.bcn.midokura.com/artifactory/api/gpg/key/public"
 #ART_URI="http://bcn4.bcn.midokura.com:8081/artifactory/midonet"
@@ -230,7 +232,10 @@ function install_package_from_repo {
     # add midokura sources to apt
     $ECHO sudo bash -c "echo deb [arch=all] $URI $DIST $COMP > /etc/apt/sources.list.d/midokura-midonet.list"
     $ECHO curl -k $CURI | sudo apt-key add - && true
-    
+
+    artifactory_user=ci-jenkins
+    artifactory_password=AP3WkR7bsSRcv3B81WaVqmvta5a
+
     $ECHO sudo apt-get update
     
     # Install midolman
