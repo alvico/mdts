@@ -128,7 +128,7 @@ sudo pip install pyhamcrest
 
 # Docker
 # Install extra tools to work around https://github.com/docker/docker/issues/4036
-sudo apt-get install linux-image-extra-$(uname -r)
+sudo apt-get install -y linux-image-extra-$(uname -r)
 curl -sSL https://get.docker.com/ubuntu/ | sudo sh
 
 #
