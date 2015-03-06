@@ -514,11 +514,11 @@ fi
 if [ ".$LOCAL_TEST" == ".false" ]; then
     # Mounting ramdisks
     sudo cp -RL --preserve=all /var/lib /tmp/
-    sudo mkdir /var/lib
+    sudo mkdir -p /var/lib
     sudo mount -t tmpfs -o size=1024m tmpfs /var/lib
     sudo cp -RL --preserve=all /tmp/lib/* /var/lib/
     sudo cp -RL --preserve=all /var/log /tmp/
-    sudo mkdir /var/log
+    sudo mkdir -p /var/log
     sudo mount -t tmpfs -o size=256m tmpfs /var/log
     sudo cp -RL --preserve=all /tmp/log/* /var/log
 fi
