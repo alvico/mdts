@@ -1,4 +1,4 @@
-#!/bin/bash -xe
+#!/bin/bash -x
 
 if [ ".$WORKSPACE" == "." ]; then
     WORKSPACE=$( cd `dirname ${BASH_SOURCE[0]}`/../.. ; pwd)
@@ -16,6 +16,8 @@ GIT_CREDENTIALS=
 REPO_URI="http://repo.midonet.org/midonet/current"
 REPO_CURL_URI="http://repo.midonet.org/packages.midokura.key"
 REPO_DIST="unstable"
+#ART_URI="ssh://ci-jenkins@artifactory-dev.bcn.midokura.com/artifactory/midonet"
+#ART_CURL_URI="http://artifactory-dev.bcn.midokura.com/artifactory/api/gpg/key/public"
 ART_URI="http://artifactory-dev.bcn.midokura.com/artifactory/midonet"
 ART_CURL_URI="http://artifactory-dev.bcn.midokura.com/artifactory/api/gpg/key/public"
 #ART_URI="http://bcn4.bcn.midokura.com:8081/artifactory/midonet"
@@ -38,11 +40,10 @@ PKG_DIST=
 TARGET=
 NO_RUN=false
 ECHO=
-CLEAN_CMD=
+MDTS_CMD="start test stop"
 
 # Helper Functions
-function usage()
-{
+function usage() {
     set +x
     if [ ".$1" != "." ]; then
 	echo "Error: $1"
@@ -50,7 +51,7 @@ function usage()
     echo "Usage: mdts_cbt [opts] git <repo> <branch> [-gs <server>] [-ssh]"
     echo "       mdts_cbt [opts] (source|file) <source_dir>"
     echo "       mdts_cbt [opts] (package|artifactory) <uri> <component>"
-    echo "       mdts_cbt [opts] (stop|clean)"
+    echo "       mdts_cbt [opts] mdts (start|stop|test|clean)"
     echo " "
     echo " General Options (opts):"
     echo "       -tr <dir>               Sets the test root to <dir> (defaults to WS/mdts/tests)"
@@ -63,29 +64,33 @@ function usage()
     echo "       -nt                     Do not run tests, only fetch/build/install MN"
     echo "       -n                      Dry run: print commands that would be run but don't proceed"
     echo " Targets: (must specify one and only one):"
-    echo "    Pull MN from git repository:"
+    echo "    Target MN in a git repository:"
     echo "       git <repo> <branch>     Test against MidoNet found in git repo <repo> on <branch>. "
     echo "       Options:"
     echo "          -git-server <srv>    Set the GIT hub server to use for source (default is github.com)"
     echo "          -git-ssh <user>      Use SSH to connect to GIT server as <user>"
     echo "          -ni                  Do not install MN packages after building source"
-    echo "    Pull MN from packages on disk:"
+    echo "    Target MN in source code on disk:"
     echo "       source <dir>            Test against packages waiting on disk in <dir>"
     echo "       Options:"
     echo "          -ni                  Do not install MN packages after building source"
-    echo "    Pull MN from packages on disk:"
+    echo "    Target MN in pre-built packages on disk:"
     echo "       file <dir>              Test against packages waiting on disk in <dir>"
-    echo "    Pull MN from apt-get repository:"
+    echo "    Target MN in an apt-get repository:"
     echo "       package <uri> <dst>     Test against MidoNet <item> repository located at <uri>"
-    echo "    Pull MN from artifactory repository:"
+    echo "    Target MN in an artifactory repository:"
     echo "       artifactory <uri> <dst> Test against MidoNet <item> artifactory product located at <uri>"
-    echo "    Cleanup currently running test system:"
-    echo "       stop                    Shutdown the MDTS system"
-    echo "       clean                   Stops MDTS and uninstalls MidoNet packages"
+    echo "    Direct control over the MDTS subsystem (no source/package interaction will occur):"
+    echo "       mdts                    Send a command to the MDTS subsytem"
+    echo "       Options:"
+    echo "         start                 Init, boot, and start the MDTS subsystem"
+    echo "         stop                  Shutdown the MDTS subsystem"
+    echo "         test                  Start the MDTS sybsystem, run tests, then shut it down"
+    echo "         testd                 Directly run the MDTS tests on the subsystem"
+    echo "         clean                 Stops MDTS and uninstalls MidoNet packages"
 }
 
-function check_and_set()
-{
+function check_and_set() {
     VAR=$1
     shift
     if [ $# -eq 0 ]; then 
@@ -100,13 +105,109 @@ function check_and_set()
     return 0
 }
 
-function clean_target()
-{
-    TEST_ROOT_DIR=$1
-    shift
+function setup_environment() {
+    $ECHO cd $TEST_ROOT
+
+    #Set up the test server with all the tools we'll need to test MidoNet
+    if [ ".$INSTALL_ENV" == ".true" ]; then
+	$ECHO ./setup_test_server $TEST_ROOT
+    fi
+}
+
+function fetch_source_from_git() {
+    $ECHO rm -rf $SOURCE_DIR
+    if [ ".$GIT_SSH" == ".true" ]; then
+	GIT_CX=$GIT_SSH_USER@$GIT_SERVER:$SOURCE_REPO 
+    else
+	GIT_CX=http://$GIT_SERVER/$SOURCE_REPO 
+    fi
+    echo "Fetching source code from $GIT_CX -b $BRANCH into dir: $DIR"
+    $ECHO git clone $GIT_CX -b $SOURCE_BRANCH $SOURCE_DIR
+}
+
+
+function build_source_from_dir {
+    echo "Will build source from $SOURCE_DIR"
+    $ECHO cd $SOURCE_DIR
+    
+    $ECHO export LD_LIBRARY_PATH=".:/lib:/usr/lib:/usr/local/lib:./lib"
+    
+    $ECHO git submodule update --init --recursive
+    
+    # Build midonet source
+    $ECHO ./gradlew -x test debian
+}
+
+function install_package_from_dir() {
+    echo "Installing midonet packages from all *.deb files in $SOURCE_DIR"
+    $ECHO cd $SOURCE_DIR
+
+    for package in `find . -name *.deb`
+    do
+	$ECHO sudo dpkg --force-confold -i $package
+    done
+}
+
+function remove_mn_packages() {
+    # CLean pre-installed midolman if present
+    if [[ `dpkg -l | grep -q midolman` -eq 0 ]]; then
+	mdts_clean mdts && true
+    fi
+}	
+
+function install_package_from_repo() {
+    echo "Installing midonet from pre-built packages at $PKG_URI $PKG_DIST $PKG_COMP"
+
+    # add midokura sources to apt
+    $ECHO sudo bash -c "echo deb [arch=all] $PKG_URI $PKG_DIST $PKG_COMP > /etc/apt/sources.list.d/midokura-midonet.list"
+    $ECHO curl -k $CURL_URI | sudo apt-key add - && true
+
+    artifactory_user=ci-jenkins
+    artifactory_password=AP3WkR7bsSRcv3B81WaVqmvta5a
+
+    $ECHO sudo apt-get update
+    
+    # Install midolman
+    $ECHO sudo apt-get install -y --force-yes midolman
+    $ECHO sudo update-rc.d midolman enable
+    
+    $ECHO sudo apt-get install -y --force-yes python-midonetclient
+    $ECHO sudo apt-get -o Dpkg::Options::="--force-confnew" install -y --force-yes midonet-api
+}
+
+function mdts_start() {
+    echo "Tests are in $TEST_ROOT (will create if needed)"
+    $ECHO cd $TEST_ROOT/mmm
+    # all mmm init
+    $ECHO sudo ./init
+    
+    $ECHO cd scripts
+    $ECHO sudo ./boot
+    $ECHO sudo ./start
+    
+    # Wait for all midolman hosts
+    if [ ".$NO_RUN" == ".false" ]; then
+	RETRIES=30
+	CONNECTED=false
+	while [ $CONNECTED == "false" ]; do
+	    if [ `midonet-cli --midonet-url http://localhost:8080/midonet-api -A -e "host list" | wc -l` -eq 3 ]; then
+		CONNECTED=true
+	    elif [ $RETRIES -eq 0 ]; then
+		echo "Midolman hosts failed to start.  Midonet-API host list:"
+		midonet-cli --midonet-url http://localhost:8080/midonet-api -A -e "host list"
+		exit 1
+	    else
+		(( RETRIES-- ))
+		sleep 5
+	    fi
+	done
+    fi
+}
+
+function mdts_clean_target() {
     case $1 in
 	"process")
-	    $ECHO cd $TEST_ROOT_DIR/mmm/scripts
+	    $ECHO cd $TEST_ROOT/mmm/scripts
 	    $ECHO sudo ./stop && true
 	    $ECHO sudo ./shutdown && true
 	    $ECHO sudo update-rc.d midolman disable && true
@@ -141,24 +242,21 @@ function clean_target()
     esac
 }
 
-function clean()
-{
+function mdts_clean() {
     if [ ".$1" == "." ]; then
-	    clean_target process
+	    mdts_clean_target process
     else
 	while [ ".$1" != "." ]; do
 	    if [ ".$1" == ".all" ]; then
 		for i in process mdts conf logs libs; do
-		    clean_target $i
+		    mdts_clean_target $i
 		done
 	    elif [ ".$1" == ".files" ]; then
 		for i in conf logs libs; do
-		    clean_target $i
+		    mdts_clean_target $i
 		done
-	    elif [ ".$1" == "." ]; then
-		clean_target process
 	    else
-		clean_target $1
+		mdts_clean_target $1
 	    fi
 	    shift
 	done
@@ -166,91 +264,37 @@ function clean()
 
 }
 
+function mdts_stop() {
+    mdts_clean_target process
+}
 
-function fetch_source_from_git()
-{
-    DIR=$1
-    SERVER=$2
-    REPO=$3
-    BRANCH=$4
-    SSH=$5
-    SSH_USER=$6
-    
-    $ECHO rm -rf $DIR
-    if [ ".$SSH" == ".true" ]; then
-	GIT_CX=$SSH_USER@$SERVER:$REPO 
-    else
-	GIT_CX=http://$SERVER/$REPO 
+function mdts_test() {
+    if [ ".$RUN_TESTS" == ".true" ]; then
+	$ECHO cd $TEST_ROOT/mdts/tests/functional_tests
+	
+	# exclude bgp and l2gw tests (bgp and l2gw tests are executed in separate jobs)
+	$ECHO ./run_tests.sh $TESTS_LINE $EXCLUDE_LINE
     fi
-    echo "Fetching source code from $GIT_CX -b $BRANCH into dir: $DIR"
-    $ECHO git clone $GIT_CX -b $BRANCH $DIR
-}
-
-
-function build_source_from_dir {
-    DIR=$1
-
-    echo "Will build source from $DIR"
-    $ECHO cd $DIR
-    
-    $ECHO export LD_LIBRARY_PATH=".:/lib:/usr/lib:/usr/local/lib:./lib"
-    
-    $ECHO git submodule update --init --recursive
-    
-    # Build midonet source
-    $ECHO ./gradlew -x test debian
-}
-
-function install_package_from_dir {
-    DIR=$1
-
-    echo "Installing midonet packages from all *.deb files in $DIR"
-    $ECHO cd $DIR
-
-    for package in `find . -name *.deb`
-    do
-	$ECHO sudo dpkg --force-confold -i $package
-    done
-}
-
-function remove_mn_packages {
-    # CLean pre-installed midolman if present
-    if [[ `dpkg -l | grep -q midolman` -eq 0 ]]; then
-	clean mdts && true
-    fi
-}	
-
-function install_package_from_repo {
-    URI=$1
-    DIST=$2
-    COMP=$3
-    CURI=$4
-    echo "Installing midonet from pre-built packages at $1 $2 $3"
-
-    # add midokura sources to apt
-    $ECHO sudo bash -c "echo deb [arch=all] $URI $DIST $COMP > /etc/apt/sources.list.d/midokura-midonet.list"
-    $ECHO curl -k $CURI | sudo apt-key add - && true
-    
-    $ECHO sudo apt-get update
-    
-    # Install midolman
-    $ECHO sudo apt-get install -y --force-yes midolman
-    $ECHO sudo update-rc.d midolman enable
-    
-    $ECHO sudo apt-get install -y --force-yes python-midonetclient
-    $ECHO sudo apt-get -o Dpkg::Options::="--force-confnew" install -y --force-yes midonet-api
 }
 
 function print_config_check() {
     NEG="will NOT"
-    if [ ".$1" == .$2 ]; then
+    if [ "$1" == ".true" ]; then
 	NEG="WILL"
     fi
-    shift 2
-    echo "We $NEG $@"
+    echo "We $NEG $2"
 }
 
-function print_config {
+function print-grep() {
+    if echo "$1" | grep -q "$2"; then
+	echo "true"
+	return 0
+    fi
+    echo "false"
+    return 1
+}
+
+function print_config() {
     set +x
     echo target=$TARGET
     echo install_env=$INSTALL_ENV
@@ -270,28 +314,20 @@ function print_config {
     echo tests_to_run=$TESTS_TO_RUN
     echo tests_exclude=$TESTS_TO_EXCLUDE
     echo workspace=$WORKSPACE
-    echo clean_target=$CLEAN_CMD
+    echo mdts_target=$MDTS_CMD
 
-    print_config_check $INSTALL_ENV true "install and setup base environment"
-    case $TARGET in
-	git|source)
-	    print_config_check $TARGET "git" "fetch MN source from git"
-	    print_config_check true true "build MN source"
-	    print_config_check $INSTALL_PKG true "install MN packages"
-	    ;;
-	file )
-	    print_config_check true false "fetch MN source from git"
-	    print_config_check true false "build MN source"
-	    print_config_check true true "install MN packages"
-	    ;;
-	package )
-	    print_config_check true true "fetch MN packages from APT-GET repository"
-	    ;;
-	artifactory )
-	    print_config_check true true "fetch MN packages from Artifactory"
-	    ;;
-    esac
-    print_config_check $RUN_TESTS true "run MDTS functional tests"
+    print_config_check ."$INSTALL_ENV" "install and setup base environment"
+    print_config_check .`print-grep "$TARGET" "git"` "fetch MN source from git"
+    print_config_check .`print-grep "$TARGET" "source"` "build MN source"
+    print_config_check .`print-grep "$TARGET" "file" | grep "$INSTALL_PKG"` "install MN packages"
+    print_config_check .`print-grep "$TARGET" "artifactory"` "fetch MN packages from Artifactory"
+    print_config_check .`print-grep "$TARGET" "package"` "fetch MN packages from APT-GET repository"
+    if [ .`print-grep "$TARGET" "mdts"` == ".true" ]; then
+	print_config_check .`print-grep "$MDTS_CMD" "start"` "start the MDTS subsystem"
+	print_config_check .`print-grep "$MDTS_CMD" "test" | grep "$RUN_TESTS"` "run MDTS functional tests"
+	print_config_check .`print-grep "$MDTS_CMD" "stop"` "stop the MDTS subsystem"
+	print_config_check .`print-grep "$MDTS_CMD" "clean"` "clean the MDTS subsystem"
+    fi
 
     set -x
 }
@@ -301,27 +337,6 @@ function print_config {
 
 while [ ".$1" != "." ]; do
     case $1 in
-	# Cleaning and Stopping the system
-	"stop" | --stop )
-	    CLEAN_CMD="process"
-	    shift
-	    ;;
-
-	"clean" | --clean )
-	    CLEAN_CMD="process mdts"
-	    shift
-	    ;;
-
-	"cleanall" | --clean-all )
-	    CLEAN_CMD="all"
-	    shift
-	    ;;
-
-	"cleanconfig" | --clean-config )
-	    CLEAN_CMD="process files"
-	    shift
-	    ;;
-
 	# Behavior flags
 	-n | --no-run )
 	    NO_RUN="true"
@@ -380,7 +395,7 @@ while [ ".$1" != "." ]; do
 		usage "Specified more than one MN target"
 		exit 1
 	    fi
-	    TARGET=git
+	    TARGET="git source file mdts"
 	    shift
 	    check_and_set SOURCE_REPO $* && shift
 	    check_and_set SOURCE_BRANCH $* && shift
@@ -391,7 +406,7 @@ while [ ".$1" != "." ]; do
 		usage "Specified more than one MN target"
 		exit 1
 	    fi
-	    TARGET=source
+	    TARGET="source file mdts"
 	    shift
 	    check_and_set SOURCE_DIR $* && shift
             ;;
@@ -401,7 +416,7 @@ while [ ".$1" != "." ]; do
 		usage "Specified more than one MN target"
 		exit 1
 	    fi
-	    TARGET=file
+	    TARGET="file mdts"
 	    shift
 	    check_and_set SOURCE_DIR $* && shift
 	    ;;
@@ -411,7 +426,7 @@ while [ ".$1" != "." ]; do
 		usage "Specified more than one MN target"
 		exit 1
 	    fi
-	    TARGET=package
+	    TARGET="package mdts"
 	    CURL_URI=$REPO_CURL_URI
 	    PKG_URI=$REPO_URI
 	    PKG_DIST=$REPO_DIST
@@ -425,7 +440,7 @@ while [ ".$1" != "." ]; do
 		usage "Specified more than one MN target"
 		exit 1
 	    fi
-	    TARGET=artifactory
+	    TARGET="artifactory mdts"
 	    CURL_URI=$ART_CURL_URI
 	    PKG_URI=$ART_URI
 	    PKG_DIST=$ART_DIST
@@ -463,6 +478,57 @@ while [ ".$1" != "." ]; do
 	    shift
 	    ;;
 
+	# Controlling the MDTS subsystem directly
+	"mdts" )
+	    shift
+	    TARGET="mdts"
+	    case $1 in 
+		"start" )
+		    MDTS_CMD="start"
+		    shift
+		    ;;
+		
+		"test" )
+		    MDTS_CMD="start test stop"
+		    shift
+		    ;;
+
+		"testd" )
+		    MDTS_CMD="test"
+		    shift
+		    ;;
+
+		"stop" )
+		    MDTS_CMD="stop"
+		    shift
+		    ;;
+		
+		"clean" )
+		    MDTS_CMD="clean"
+		    MDTS_CLEAN_OPTS="process mdts"
+		    shift
+		    ;;
+		
+		"cleanall" )
+		    MDTS_CMD="clean"
+		    MDTS_CLEAN_OPTS="all"
+		    shift
+		    ;;
+		
+		"cleanconfig" )
+		    MDTS_CMD="clean"
+		    MDTS_CLEAN_OPTS="process files"
+		    shift
+		    ;;
+
+		*)
+		    usage "Must specify a comand to MDTS: start, stop, clean, cleanall, cleanconfig, test, testd"
+		    exit 1
+		    ;;
+
+		esac
+	    ;;
+
 	# Help
         -h | --help )
             usage
@@ -477,9 +543,15 @@ while [ ".$1" != "." ]; do
     esac
 done
 
-if [ ".$CLEAN_CMD" == "." -a ".$TARGET" == "." ]; then
-    usage "Must specify CBT target: git, source, file, package, artifactory; or a clean target: stop, clean, cleanconfig, cleanall"
+if [ ".$TARGET" == "." ]; then
+    usage "Must specify CBT target: git, source, file, package, artifactory; or mdts"
     exit 1
+fi
+
+# Set up echo to spit out commands instead of running them if dry-run is set
+if [ ".$NO_RUN" == ".true" ]; then
+    ECHO="echo"
+    set +x
 fi
 
 echo "IP interfaces: "
@@ -493,38 +565,18 @@ date
 
 print_config
 
-# Set up echo to spit out commands instead of running them if dry-run is set
-if [ ".$NO_RUN" == ".true" ]; then
-    ECHO="echo"
-    set +x
-fi
-
-# If there's a clean command, just run it and exit
-if [ ".$CLEAN_CMD" != "." ]; then
-    clean $TEST_ROOT $CLEAN_CMD
-    exit 
-fi
-
 # Remote (i.e. jenkins) test tweaks for speed
 if [ ".$LOCAL_TEST" == ".false" ]; then
     # Mounting ramdisks
     sudo cp -RL --preserve=all /var/lib /tmp/
-    sudo mkdir /var/lib
+    sudo mkdir -p /var/lib
     sudo mount -t tmpfs -o size=1024m tmpfs /var/lib
     sudo cp -RL --preserve=all /tmp/lib/* /var/lib/
     sudo cp -RL --preserve=all /var/log /tmp/
-    sudo mkdir /var/log
+    sudo mkdir -p /var/log
     sudo mount -t tmpfs -o size=256m tmpfs /var/log
     sudo cp -RL --preserve=all /tmp/log/* /var/log
 fi
-
-$ECHO cd $TEST_ROOT
-
-#Set up the test server with all the tools we'll need to test MidoNet
-if [ ".$INSTALL_ENV" == ".true" ]; then
-    $ECHO ./setup_test_server $TEST_ROOT
-fi
-
 
 # git = Source from GIT, fetch, build and install
 # source = Source on disk, build and install
@@ -532,64 +584,41 @@ fi
 # package = Package on standard apt-get repo, fetch and install
 # artifactory = Package on artifactory apt-get repo, fetch and install
 
-case $TARGET in
-    "git")
-	fetch_source_from_git $SOURCE_DIR $GIT_SERVER $SOURCE_REPO $SOURCE_BRANCH $GIT_SSH $GIT_SSH_USER
-	build_source_from_dir $SOURCE_DIR
-	if [ ".$INSTALL_PKG" == ".true" ]; then
-	    install_package_from_dir $SOURCE_DIR
-	fi
-	;;
-    "source")
-	build_source_from_dir $SOURCE_DIR
-	if [ ".$INSTALL_PKG" == ".true" ]; then
-	    install_package_from_dir $SOURCE_DIR
-	fi
-	;;
-    "file")
-	remove_mn_packages
-	install_package_from_dir $SOURCE_DIR
-	;;
-    "package"|"artifactory")
-	remove_mn_packages
-	install_package_from_repo $PKG_URI $PKG_DIST $PKG_COMP $CURL_URI
-	;;
-esac
-
-if [ ".$RUN_TESTS" == ".false" ]; then
-    exit
-fi
-
-echo "Tests are in $TEST_ROOT (will create if needed)"
-$ECHO cd $TEST_ROOT/mmm
-# all mmm init
-$ECHO sudo ./init
-
-$ECHO cd scripts
-$ECHO sudo ./boot
-$ECHO sudo ./start
-
-# Wait for all midolman hosts
-if [ ".$NO_RUN" == ".false" ]; then
-    RETRIES=30
-    CONNECTED=false
-    while [ $CONNECTED == "false" ]; do
-	if [ `midonet-cli --midonet-url http://localhost:8080/midonet-api -A -e "host list" | wc -l` -eq 3 ]; then
-	    CONNECTED=true
-	elif [ $RETRIES -eq 0 ]; then
-	    echo "Midolman hosts failed to start.  Midonet-API host list:"
-	    midonet-cli --midonet-url http://localhost:8080/midonet-api -A -e "host list"
-	    exit 1
-	else
-	    (( RETRIES-- ))
-	    sleep 5
-	fi
-    done
-fi
-
-$ECHO cd $TEST_ROOT/mdts/tests/functional_tests
-
-# exclude bgp and l2gw tests (bgp and l2gw tests are executed in separate jobs)
-$ECHO ./run_tests.sh $TESTS_LINE $EXCLUDE_LINE
-
+setup_environment
+for i in $TARGET; do
+    case $i in
+	"git")
+	    fetch_source_from_git
+	    ;;
+	"source")
+	    build_source_from_dir
+	    ;;
+	"file")
+	    remove_mn_packages
+	    install_package_from_dir
+	    ;;
+	"package"|"artifactory")
+	    remove_mn_packages
+	    install_package_from_repo
+	    ;;
+	"mdts")
+	    for i in $MDTS_CMD; do
+		case $i in
+		    "start" )
+			mdts_start
+			;;
+		    "test" )
+			mdts_test
+			;;
+		    "stop" )
+			mdts_stop
+			;;
+		    "clean" )
+			mdts_clean $MDTS_CLEAN_OPTS
+			;;
+		esac
+	    done
+	    ;;
+    esac
+done
 
