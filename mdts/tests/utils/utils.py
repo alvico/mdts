@@ -235,13 +235,13 @@ def ipv4_int(ipv4_str):
     return addr_int
 
 def get_top_dir():
-    """Returns the top dir of the midonet repo"""
-    topdir = os.path.realpath(os.path.dirname(__file__) + '../../../../../')
+    """Returns the root dir of MDTS"""
+    topdir = os.path.realpath(os.path.dirname(__file__) + '../../../../')
     return topdir
 
 def get_midolman_script_dir():
     """Returns abs path to Midolman scripts directory"""
-    return get_top_dir() + '/tests/mmm/scripts/midolman'
+    return get_top_dir() + '/mmm/scripts/midolman'
 
 
 def start_midolman_agents():
