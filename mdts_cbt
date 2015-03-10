@@ -13,18 +13,21 @@ GIT_SERVER="github.com"
 GIT_SSH=false
 GIT_SSH_USER=
 GIT_CREDENTIALS=
-REPO_URI="http://repo.midonet.org/midonet/current"
+REPO_SERVER="repo.midonet.org/midonet/current"
 REPO_CURL_URI="http://repo.midonet.org/packages.midokura.key"
 REPO_DIST="unstable"
 #ART_URI="ssh://ci-jenkins@artifactory-dev.bcn.midokura.com/artifactory/midonet"
 #ART_CURL_URI="http://artifactory-dev.bcn.midokura.com/artifactory/api/gpg/key/public"
-ART_URI="http://artifactory-dev.bcn.midokura.com/artifactory/midonet"
+ART_SERVER="artifactory-dev.bcn.midokura.com/artifactory/midonet"
 ART_CURL_URI="http://artifactory-dev.bcn.midokura.com/artifactory/api/gpg/key/public"
 #ART_URI="http://bcn4.bcn.midokura.com:8081/artifactory/midonet"
 #ART_CURL_URI="http://bcn4.bcn.midokura.com:8081/artifactory/api/gpg/key/public"
 ART_DIST="nightly"
 PKG_COMP="main"
 LOCAL_TEST="true"
+AUTH_METHOD="http"
+AUTH_USER=
+AUTH_PASS=
 TESTS_TO_RUN=
 TESTS_TO_EXCLUDE=
 
@@ -34,9 +37,11 @@ INSTALL_ENV=true
 INSTALL_PKG=true
 FETCH_SOURCE=true
 BUILD_SOURCE=true
-RUN_TESTS="true"
-PKG_URI=
+RUN_TESTS=true
+RUN_MDTS=true
+PKG_SERVER=
 PKG_DIST=
+USE_AUTH=false
 TARGET=
 NO_RUN=false
 ECHO=
@@ -65,21 +70,24 @@ function usage() {
     echo "       -n                      Dry run: print commands that would be run but don't proceed"
     echo " Targets: (must specify one and only one):"
     echo "    Target MN in a git repository:"
-    echo "       git <repo> <branch>     Test against MidoNet found in git repo <repo> on <branch>. "
+    echo "       git <repo> <branch>     Use MidoNet found in git repo <repo> on <branch>. "
     echo "       Options:"
     echo "          -git-server <srv>    Set the GIT hub server to use for source (default is github.com)"
     echo "          -git-ssh <user>      Use SSH to connect to GIT server as <user>"
     echo "          -ni                  Do not install MN packages after building source"
     echo "    Target MN in source code on disk:"
-    echo "       source <dir>            Test against packages waiting on disk in <dir>"
+    echo "       source <dir>            Use packages waiting on disk in <dir>"
     echo "       Options:"
     echo "          -ni                  Do not install MN packages after building source"
     echo "    Target MN in pre-built packages on disk:"
-    echo "       file <dir>              Test against packages waiting on disk in <dir>"
+    echo "       file <dir>              Use packages waiting on disk in <dir>"
     echo "    Target MN in an apt-get repository:"
-    echo "       package <uri> <dst>     Test against MidoNet <item> repository located at <uri>"
-    echo "    Target MN in an artifactory repository:"
-    echo "       artifactory <uri> <dst> Test against MidoNet <item> artifactory product located at <uri>"
+    echo "       package <srv> <dst>     Use MidoNet <dst> repository located at <srv>"
+    echo "       artifactory <srv> <dst> Use MidoNet <dst> artifactory product located at <srv>"
+    echo "       Options:"
+    echo "          -auth-user <user>    Use authentication to server with user name <user>"
+    echo "          -auth-pass <pw>      Use <pw> as password for authentication"
+    echo "          -auth-method <mthd>  Use <mthd> as the authentication method (default is http)"
     echo "    Direct control over the MDTS subsystem (no source/package interaction will occur):"
     echo "       mdts                    Send a command to the MDTS subsytem"
     echo "       Options:"
@@ -156,14 +164,19 @@ function remove_mn_packages() {
 }	
 
 function install_package_from_repo() {
-    echo "Installing midonet from pre-built packages at $PKG_URI $PKG_DIST $PKG_COMP"
+    SERVER_LINE="$AUTH_METHOD://"
+    if [ ".$USE_AUTH" == ".true" ]; then
+	SERVER_LINE=$SERVER_LINE"$AUTH_USER:$AUTH_PASS@"
+    fi
+    SERVER_LINE="$SERVER_LINE$PKG_SERVER"
 
-    # add midokura sources to apt
-    $ECHO sudo bash -c "echo deb [arch=all] $PKG_URI $PKG_DIST $PKG_COMP > /etc/apt/sources.list.d/midokura-midonet.list"
+    echo "Installing midonet from pre-built packages at $SERVER_LINE $PKG_DIST $PKG_COMP"
+
+    set -e
+    # add midokura apt to sources list
+    $ECHO sudo bash -c "echo deb [arch=all] $SERVER_LINE $PKG_DIST $PKG_COMP > /etc/apt/sources.list.d/midokura-midonet.list"
     $ECHO curl -k $CURL_URI | sudo apt-key add - && true
 
-    artifactory_user=ci-jenkins
-    artifactory_password=AP3WkR7bsSRcv3B81WaVqmvta5a
 
     $ECHO sudo apt-get update
     
@@ -173,34 +186,37 @@ function install_package_from_repo() {
     
     $ECHO sudo apt-get install -y --force-yes python-midonetclient
     $ECHO sudo apt-get -o Dpkg::Options::="--force-confnew" install -y --force-yes midonet-api
+    set +e
 }
 
 function mdts_start() {
-    echo "Tests are in $TEST_ROOT (will create if needed)"
-    $ECHO cd $TEST_ROOT/mmm
-    # all mmm init
-    $ECHO sudo ./init
-    
-    $ECHO cd scripts
-    $ECHO sudo ./boot
-    $ECHO sudo ./start
-    
-    # Wait for all midolman hosts
-    if [ ".$NO_RUN" == ".false" ]; then
-	RETRIES=30
-	CONNECTED=false
-	while [ $CONNECTED == "false" ]; do
-	    if [ `midonet-cli --midonet-url http://localhost:8080/midonet-api -A -e "host list" | wc -l` -eq 3 ]; then
-		CONNECTED=true
-	    elif [ $RETRIES -eq 0 ]; then
-		echo "Midolman hosts failed to start.  Midonet-API host list:"
-		midonet-cli --midonet-url http://localhost:8080/midonet-api -A -e "host list"
-		exit 1
-	    else
-		(( RETRIES-- ))
-		sleep 5
-	    fi
-	done
+    if [ ".$RUN_MDTS" == ".true" ]; then
+		echo "Tests are in $TEST_ROOT (will create if needed)"
+		$ECHO cd $TEST_ROOT/mmm
+		# all mmm init
+		$ECHO sudo ./init
+		
+		$ECHO cd scripts
+		$ECHO sudo ./boot
+		$ECHO sudo ./start
+	
+		# Wait for all midolman hosts
+		if [ ".$NO_RUN" == ".false" ]; then
+		    RETRIES=30
+		    CONNECTED=false
+		    while [ $CONNECTED == "false" ]; do
+			if [ `midonet-cli --midonet-url http://localhost:8080/midonet-api -A -e "host list" | wc -l` -eq 3 ]; then
+			    CONNECTED=true
+			elif [ $RETRIES -eq 0 ]; then
+			    echo "Midolman hosts failed to start.  Midonet-API host list:"
+			    midonet-cli --midonet-url http://localhost:8080/midonet-api -A -e "host list"
+			    exit 1
+			else
+			    (( RETRIES-- ))
+			    sleep 5
+		    fi
+		    done
+		fi
     fi
 }
 
@@ -265,7 +281,9 @@ function mdts_clean() {
 }
 
 function mdts_stop() {
-    mdts_clean_target process
+    if [ ".$RUN_MDTS" == ".true" ]; then
+		mdts_clean_target process
+    fi
 }
 
 function mdts_test() {
@@ -306,7 +324,7 @@ function print_config() {
     echo source_branch=$SOURCE_BRANCH
     echo source_repo=$SOURCE_REPO
     echo install_package=$INSTALL_PKG
-    echo pkg_uri=$PKG_URI
+    echo pkg_server=$PKG_SERVER
     echo curl_uri=$CURL_URI
     echo pkg_distribution=$PKG_DIST
     echo pkg_component=$PKG_COMP
@@ -323,9 +341,9 @@ function print_config() {
     print_config_check .`print-grep "$TARGET" "artifactory"` "fetch MN packages from Artifactory"
     print_config_check .`print-grep "$TARGET" "package"` "fetch MN packages from APT-GET repository"
     if [ .`print-grep "$TARGET" "mdts"` == ".true" ]; then
-	print_config_check .`print-grep "$MDTS_CMD" "start"` "start the MDTS subsystem"
+	print_config_check .`print-grep "$MDTS_CMD" "start" | grep "$RUN_MDTS"` "start the MDTS subsystem"
 	print_config_check .`print-grep "$MDTS_CMD" "test" | grep "$RUN_TESTS"` "run MDTS functional tests"
-	print_config_check .`print-grep "$MDTS_CMD" "stop"` "stop the MDTS subsystem"
+	print_config_check .`print-grep "$MDTS_CMD" "stop" | grep "$RUN_MDTS"` "stop the MDTS subsystem"
 	print_config_check .`print-grep "$MDTS_CMD" "clean"` "clean the MDTS subsystem"
     fi
 
@@ -360,6 +378,11 @@ while [ ".$1" != "." ]; do
 
 	-nt | --no-tests )
 	    RUN_TESTS="false"
+	    shift
+	    ;;
+
+	-nm | --no-mdts )
+	    RUN_MDTS="false"
 	    shift
 	    ;;
 
@@ -428,10 +451,10 @@ while [ ".$1" != "." ]; do
 	    fi
 	    TARGET="package mdts"
 	    CURL_URI=$REPO_CURL_URI
-	    PKG_URI=$REPO_URI
+	    PKG_SERVER=$REPO_SERVER
 	    PKG_DIST=$REPO_DIST
 	    shift
-	    check_and_set PKG_URI $* && shift
+	    check_and_set PKG_SERVER $* && shift
 	    check_and_set PKG_DIST $* && shift
             ;;
 
@@ -442,10 +465,10 @@ while [ ".$1" != "." ]; do
 	    fi
 	    TARGET="artifactory mdts"
 	    CURL_URI=$ART_CURL_URI
-	    PKG_URI=$ART_URI
+	    PKG_SERVER=$ART_SERVER
 	    PKG_DIST=$ART_DIST
 	    shift
-	    check_and_set PKG_URI $* && shift
+	    check_and_set PKG_SERVER $* && shift
 	    check_and_set PKG_DIST $* && shift
             ;;
 
@@ -475,6 +498,35 @@ while [ ".$1" != "." ]; do
 		exit 1
 	    fi
 	    GIT_SSH=true
+	    shift
+	    ;;
+
+	# Authentication for repo access
+	-auth-user | --auth-user )
+	    shift
+	    if ! check_and_set AUTH_USER $*; then
+		usage "Invalid user name: $1"
+		exit 1
+	    fi
+	    USE_AUTH=true
+	    shift
+	    ;;
+
+	-auth-pass | --auth-pass )
+	    shift
+	    if ! check_and_set AUTH_PASS $*; then
+		usage "Invalid password: $1"
+		exit 1
+	    fi
+	    shift
+	    ;;
+
+	-auth-meth | --auth-meth )
+	    shift
+	    if ! check_and_set AUTH_METHOD $*; then
+		usage "Invalid authentication method: $1"
+		exit 1
+	    fi
 	    shift
 	    ;;
 
@@ -546,6 +598,13 @@ done
 if [ ".$TARGET" == "." ]; then
     usage "Must specify CBT target: git, source, file, package, artifactory; or mdts"
     exit 1
+fi
+
+if [ ".$AUTH_PASS" != "." ]; then
+    if [ ".$AUTH_USER" == "." ]; then
+	usage "Must specify user name if password given"
+	exit
+    fi
 fi
 
 # Set up echo to spit out commands instead of running them if dry-run is set
