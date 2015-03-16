@@ -59,7 +59,8 @@ sudo apt-get install -y zkdump
 
 # protobufs
 cd
-mkdir build-protoc
+rm -rf build-protoc
+mkdir -p build-protoc
 cd build-protoc
 wget https://github.com/google/protobuf/releases/download/v2.6.1/protobuf-2.6.1.tar.gz
 tar xvfz protobuf-2.6.1.tar.gz
@@ -124,10 +125,8 @@ sudo apt-get install -y python-numpy
 sudo apt-get install -y mz
 sudo apt-get install -y libyaml-dev libpython-dev
 
-sudo pip install pyyaml
-sudo pip install futures
-sudo pip install nose
-sudo pip install pyhamcrest
+# Install Python dependencies
+sudo pip install -r ./python.dependencies
 
 # Docker
 # Install extra tools to work around https://github.com/docker/docker/issues/4036
