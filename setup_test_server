@@ -58,7 +58,7 @@ sudo update-rc.d zookeeper defaults
 sudo apt-get install -y zkdump
 
 # protobufs
-cd
+cd $ROOT/..
 rm -rf build-protoc
 mkdir -p build-protoc
 cd build-protoc
@@ -67,7 +67,7 @@ tar xvfz protobuf-2.6.1.tar.gz
 cd protobuf-2.6.1
 ./configure ; make
 sudo make install
-
+cd $ROOT
 
 # Bring in newer version of iproute, which fixes "Cannot remove <namespace>: Device or resource busy":
 # https://bugs.launchpad.net/ubuntu/+source/iproute/+bug/1238981
