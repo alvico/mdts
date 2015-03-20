@@ -19,4 +19,4 @@
 # or though a test server (i.e. jenkins) which can call this script
 # as part of the automated process
 
-test_category_gate="test_bridge:test_mac_learning test_l2gw:test_icmp_from_mn test_bgp:test_snat test_router:test_ping_different_subnet test_load_balancer:test_multi_member_loadbalancing test_vxlangw:test_ping_host_on_vtep_from_all_mm"
+test_category_gate="test_bridge:test_mac_learning test_l2gw:test_icmp_from_mn test_bgp:test_snat_1 test_router:test_ping_different_subnets test_load_balancer:test_multi_member_loadbalancing test_vxlangw:test_ping_host_on_vtep_from_all_mm"
