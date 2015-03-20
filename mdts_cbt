@@ -111,6 +111,9 @@ NO_RUN=false
 # Default MDTS targets will start MDTS, test, and stop MDTS
 MDTS_CMD="start test stop"
 
+# Default location and name of test categories file
+TEST_CATEGORY_FILE="$TEST_ROOT/test_categories"
+
 # Internal vars
 PKG_SERVER=
 PKG_DIST=
@@ -133,6 +136,9 @@ function usage() {
     echo "                               WS/mdts/tests)                                 "
     echo "       -t <tests>              Tests to run against the specified target in   "
     echo "                               quotes (defaults to 'test_bridge' only)        "
+    echo "       -tc <test_category>     The category of tests to run, based on the     "
+    echo "                               pre-set categories listed in the               "
+    echo "                               <test_root>/test_categories file               "
     echo "       -x <tests>              Tests to exclude in run against the specified  "
     echo "                               target in quotes                               "
     echo "       -r                      Test from remote test server (like jenkins) on "
@@ -444,8 +450,7 @@ function print_config() {
     echo pkg_distribution=$PKG_DIST
     echo pkg_component=$PKG_COMP
     echo test_root=$TEST_ROOT
-    echo tests_to_run=$TESTS_TO_RUN
-    echo tests_exclude=$TESTS_TO_EXCLUDE
+    echo test_line=$TESTS_LINE
     echo mdts_target=$MDTS_CMD
 
     print_config_check .`print-grep "$TARGET" "env" | grep "$INSTALL_ENV"` "install and setup base environment"
@@ -466,6 +471,9 @@ function print_config() {
 
 
 #MAIN
+
+# Pull in variables from test category file
+. $TEST_CATEGORY_FILE
 
 # Check all script arguments
 while [ ".$1" != "." ]; do
@@ -508,6 +516,25 @@ while [ ".$1" != "." ]; do
                 usage "Invalid directory for test_root: $1"
                 exit 1
             fi
+            shift
+            ;;
+
+        -tc | --test-category ) # Test category to run
+            shift
+            if ! check_and_set TESTCATEGORY $*; then
+                usage "Invalid category for test: $1"
+                exit 1
+            fi
+            echo GATE=$test_category_gate
+            NEW_TESTS=$(eval echo \${test_category_$TESTCATEGORY})
+            if [ ".$NEW_TESTS" == "." ]; then
+                usage "Non-existent test category: $TESTCATEGORY"
+                exit 1
+            fi
+
+            for test in $NEW_TESTS; do
+                TESTS_LINE="$TESTS_LINE -t $test"
+            done
             shift
             ;;
 
