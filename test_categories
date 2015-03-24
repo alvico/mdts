@@ -20,4 +20,4 @@
 # as part of the automated process
 
 test_category_gate="test_bridge:test_mac_learning test_l2gw:test_icmp_from_mn test_bgp:test_snat_1 test_router:test_ping_different_subnets test_load_balancer:test_multi_member_loadbalancing"
-test_category_pre-merge="test_bridge test_l2gw test_bgp test_load_balancer testtest_chains test_conn_tracking test_delete_port test_htb test_ipfrag test_l4state test_midolman_and_interfaces test_nat_router test_router"
+test_category_premerge="test_bridge test_l2gw test_bgp test_load_balancer testtest_chains test_conn_tracking test_delete_port test_htb test_ipfrag test_l4state test_midolman_and_interfaces test_nat_router test_router"
